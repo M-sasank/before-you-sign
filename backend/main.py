@@ -18,13 +18,14 @@ from google.cloud import storage
 from google_auth_oauthlib.flow import Flow
 
 app = FastAPI()
-origins = ["*"]
+origins = ["http://localhost:3000"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_methods=["*"],
+    allow_methods=["POST","GET"],
     allow_headers=["*"],
+    allow_credentials = True
 )
 
 
@@ -76,22 +77,19 @@ async def lawyer(user_data:Annotated[str, Body()], response: Response, legal_doc
     existing_session_data = await session_backend.read(session_id)
 
     if existing_session_data is not None:
-        # Session already exists, update the data
         existing_data = existing_session_data.data
         existing_data.extend([(1,user_data)])
         gpt_data = chat_with_openai(existing_data,existing_session_data.document)
         existing_data.extend([(0,gpt_data)])
-        await session_backend.update(session_id, SessionData(data=existing_data,document=existing_session_data.document))
+        await session_backend.update(session_id, SessionData(data=existing_data,document=existing_session_data.document,credentials = existing_session_data.credentials))
         print("Updated session successfully\n")
-        # Retrieve and return the session data
-        session_data = await session_backend.read(session_id)
         return existing_data[-1][-1]
     else:
         # Session doesn't exist, create a new session
         gpt_data = chat_with_openai([],legal_document)
         init_data = (0,gpt_data)
         user_session = uuid4()
-        new_data = SessionData(data=[init_data], document=legal_document)
+        new_data = SessionData(data=[init_data], document=legal_document,credentials = "")
         await session_backend.create(user_session, new_data)
         cookie.attach_to_response(response, user_session)
         print("Created new session successfully\n")
@@ -105,8 +103,14 @@ def remind(signature_id:str, mail_list: Email):
     else:
         return "Unable to send emails. Please Try again\n"
 
-@app.post("/auth", response_model=str, status_code=200)
-def auth_google():
+@app.post("/auth", status_code=200)
+async def auth_google(session_id: UUID = Depends(cookie)):
+    print("user_session from auth", session_id)
+    existing_session_data = await session_backend.read(session_id)
+    if existing_session_data is not None:
+        if existing_session_data.credentials != "":
+            print("Credentials already exist\n")
+            return True
     Credentials = os.getenv("GOOGLE_DOCS_CREDENTIALS")
     creds_json = base64.b64decode(Credentials.encode('utf-8') + b'==').decode('utf-8')
     creds_json = json.loads(creds_json)
@@ -119,20 +123,47 @@ def auth_google():
     redirect_uri=AUTH_CALLBACK_URL)
     return flow.authorization_url()[0]
 
-@app.post("/generate", response_model=str, status_code=200)
-def generate_doc(prompt: Prompt):
-    global flow,access_token,creds
-    print("Chatting with PaLM to generate legal document\n")
+@app.post("/generate", status_code=200)
+async def generate_doc(prompt: Prompt,session_id: UUID = Depends(cookie)):
+    print("user_session in generate: ",session_id)
+    existing_session_data = await session_backend.read(session_id)
+    creds = existing_session_data.credentials
+    print("Credentials: ",type(creds))
+    if creds == "":
+        print("Error getting credentials\n")
+    print("Chatting with Open AI to generate legal document\n")
     legal_doc_data = create_legal_document(prompt.data)
-    print("Chat with PaLM completed\n")
-    return generate_google_docs_from_markdown(legal_doc_data,creds)
+    print("Chat with Open AI completed\n")
+    x = generate_google_docs_from_markdown(legal_doc_data,creds)
+    print(x, type(x))
+    return x
 
 @app.get("/callback")
-def callback(state,code):
+async def callback(state,code, response:Response, session_id: UUID = Depends(cookie)):
     print(state,code)
-    global flow,access_token,creds
+    global flow,access_token
     access_token = flow.fetch_token(code=code)
     creds = flow.credentials
+    print("created credentials succesfuly!")
+    existing_session_data = await session_backend.read(session_id)
+    if existing_session_data is not None:
+        new_data = SessionData(data=existing_session_data.data, document=existing_session_data.document,credentials=creds)
+        print(type(new_data.credentials))
+        print(new_data.data)
+        print(len(new_data.document))
+        await session_backend.update(session_id,new_data)
+        print("Updated credentials successfully\n")
+    else:
+        user_session = uuid4()
+        new_data = SessionData(data=[], document="",credentials=creds)
+        print(type(new_data.credentials))
+        print(new_data.data)
+        print(len(new_data.document))
+        await session_backend.create(user_session, new_data)
+        print("user_session: ",user_session)
+        cookie.attach_to_response(response, user_session)
+        print("Created new session successfully from auth\n")
+    
     return "Authentication is successful! Please close this window to proceed!"
 
 

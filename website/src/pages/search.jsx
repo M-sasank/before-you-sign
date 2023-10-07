@@ -34,8 +34,11 @@ const Search = () => {
       const requestBody = {data:inputValue}
       // console.log("Req body is",requestBody);
       await fetch('http://localhost:8000/generate', {
+          credentials: 'include',
           method: 'POST', // Change the request method to POST
           headers: {
+            "Access-Control-Allow-Origin": "http://localhost:8000/generate",
+            "Access-Control-Allow-Credentials": true,
               "Content-Type": "application/json", // Specify the content type as JSON
           },
           body: JSON.stringify(requestBody), // Convert the request body to JSON format
@@ -51,10 +54,13 @@ const Search = () => {
 function get_auth() {
   // console.log("Req body is",requestBody);
   fetch('http://localhost:8000/auth', {
-      method: 'POST',
-      headers: {
-          "Content-Type": "application/json",
-      },
+    mode: 'cors',
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "http://localhost:8000/auth",
+    },
   })
   
   .then((response) => {
@@ -63,8 +69,14 @@ function get_auth() {
 })
 
 .then(data => {
+    if (data === true) {
+        console.log("Already Logged in");
+        sendprompt();
+    }
+    else{
     const openwindow = window.open(data, '_blank');
     console.log(data);
+
 
     // Define a function to check if the window is closed
     const checkWindowClosed = () => {
@@ -76,6 +88,7 @@ function get_auth() {
 
     // Check every 500 milliseconds if the window is closed
     const checkInterval = setInterval(checkWindowClosed, 500);
+    }
 });
 
 }

@@ -158,7 +158,7 @@ export default function Home() {
 
     useEffect(() => {
         // clear session post request`
-        clearSession();
+        // clearSession();
         // get the base64 images
         // show welcome message
         getDocumentData(); 
